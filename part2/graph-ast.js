@@ -31,7 +31,9 @@ var expToTree = function (exp) {
 };
 exports.makeAST = function (exp) {
     return L4_ast_1.isDefineExp(exp) ? makeTree(exp.tag, [makeASTVarDecl(exp.var), makeASTCexp(exp.val)], ['var', 'val']) :
-        L4_ast_1.isProgram(exp) ? Error("not now") :
+        L4_ast_1.isProgram(exp) ? makeTree(exp.tag, [].concat(ramda_1.map(exports.makeAST, exp.exps)), [].concat(ramda_1.map(function (x) {
+            return exp.exps.indexOf(x).toString();
+        }, exp.exps))) :
             makeASTCexp(exp);
 };
 // fill this!
@@ -46,7 +48,6 @@ var makeAstSexp = function (exp) {
                 : makeLeaf("Error - undefined expression");
 };
 var makeBindingTree = function (x) {
-    // console.log(astToDot( makeTree(x.tag, [makeASTVarDecl(x.var), makeASTCexp(x.val)], ["var","val"])));
     return makeTree(x.tag, [makeASTVarDecl(x.var), makeASTCexp(x.val)], ["var", "val"]);
 };
 var makeASTCexp = function (exp) {
@@ -65,38 +66,23 @@ var makeASTCexp = function (exp) {
                     L4_ast_1.isAtomicExp(exp) ? makeAstAtomicExp(exp) :
                         L4_ast_1.isLitExp(exp) ? makeTree(exp.tag, [makeAstSexp(exp.val)], ["val"]) :
                             L4_ast_1.isLetExp(exp) ?
-                                makeTree(exp.tag, [makeTree(":", ramda_1.map(
-                                    // function (x: Binding) : Tree {
-                                    // return makeTree(x.tag, [makeASTVarDecl(x.var) ,makeASTCexp(x.val)], ["var, val"])
-                                    // },
-                                    makeBindingTree, exp.bindings), [].concat(ramda_1.map(function (x) {
+                                makeTree(exp.tag, [makeTree(":", ramda_1.map(makeBindingTree, exp.bindings), [].concat(ramda_1.map(function (x) {
                                         return exp.bindings.indexOf(x).toString();
                                     }, exp.bindings))),
                                     makeTree(":", [].concat(ramda_1.map(makeASTCexp, exp.body)), [].concat(ramda_1.map(function (x) {
                                         return exp.body.indexOf(x).toString();
                                     }, exp.body)))], ["params", "body"]) :
-                                //
-                                // makeTree(exp.tag, [
-                                //     makeTree(":", [].concat(map(function (x: Binding) : Tree {
-                                //         return makeTree(x.tag, [makeASTVarDecl(x.var), makeASTCexp(x.val)], ["var, val"]);
-                                //     }, exp.bindings)), [].concat(map(function (x: Binding): string {
-                                //         return exp.bindings.indexOf(x).toString()
-                                //     }, exp.bindings)))
-                                //
-                                // , makeTree("body", map(makeASTCexp, exp.body), [].concat(map(function (x: CExp): string {
-                                //     return exp.body.indexOf(x).toString()
-                                // }, exp.body)))], ["bindings", "body"]) :
                                 makeLeaf("Cexp");
 };
 var makeAstAtomicExp = function (exp) {
     return makeTree(exp.tag, [L4_ast_1.isPrimOp(exp) ? makeLeaf(exp.op) : L4_ast_1.isVarRef(exp) ? makeLeaf(exp.var) : makeLeaf(exp.val.toString())], ["val"]);
 };
 // Tests. Please uncomment
-// const p1 = "(define x 4)";
+// const p1 = "(L4 (define x 4))";
 // console.log(expToTree(p1));
 // const p2 = "(define y (+ x 4))";
 // console.log(expToTree(p2));
-// const p3 = "(if #t (+ x 4) 6)";
+// const p3 = "(L4 (if #t (+ x 4) 6))";
 // console.log(expToTree(p3));
-var p4 = "(let ((x 1) (y 2)) (+ x y))";
+var p4 = "(L4(let ((x 1) (y 2)) (+ x y)) (if #t (+ x 4) 6))";
 console.log(expToTree(p4));

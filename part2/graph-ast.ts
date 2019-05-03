@@ -69,7 +69,9 @@ const expToTree = (exp: string) =>
 
 export const makeAST = (exp: Parsed): Tree | Error => {
     return isDefineExp(exp) ? makeTree(exp.tag, [makeASTVarDecl(exp.var), makeASTCexp(exp.val)], ['var', 'val']) :
-        isProgram(exp) ? Error("not now") :
+        isProgram(exp) ? makeTree(exp.tag, [].concat(map(makeAST,exp.exps)), [].concat(map(function (x: Exp) {
+            return exp.exps.indexOf(x).toString()
+            },exp.exps))) :
             makeASTCexp(exp);
 };
 
@@ -132,14 +134,14 @@ const makeAstAtomicExp = (exp: AtomicExp): Tree => {
 };
 
 // Tests. Please uncomment
-// const p1 = "(define x 4)";
+// const p1 = "(L4 (define x 4))";
 // console.log(expToTree(p1));
 
 // const p2 = "(define y (+ x 4))";
 // console.log(expToTree(p2));
 
-// const p3 = "(if #t (+ x 4) 6)";
+// const p3 = "(L4 (if #t (+ x 4) 6))";
 // console.log(expToTree(p3));
 
-// const p4 = "(let ((x 1) (y 2)) (+ x y))";
+// const p4 = "(L4(let ((x 1) (y 2)) (+ x y)) (if #t (+ x 4) 6))";
 // console.log(expToTree(p4));
