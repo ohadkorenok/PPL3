@@ -69,8 +69,8 @@ const expToTree = (exp: string) =>
 
 export const makeAST = (exp: Parsed): Tree | Error => {
     return isDefineExp(exp) ? makeTree(exp.tag, [makeASTVarDecl(exp.var), makeASTCexp(exp.val)], ['var', 'val']) :
-        isProgram(exp)? Error("not now"):
-        makeASTCexp(exp);
+        isProgram(exp) ? Error("not now") :
+            makeASTCexp(exp);
 };
 
 
@@ -88,27 +88,41 @@ const makeAstSexp = (exp: SExp): Tree => {
 
 };
 
+const makeBindingTree = (x: Binding): Tree => {
+    return makeTree(x.tag, [makeASTVarDecl(x.var), makeASTCexp(x.val)], ["var", "val"]);
+};
+
 const makeASTCexp = (exp: CExp): Tree => {
-    return isAppExp(exp) ? makeTree(exp.tag, [makeASTCexp(exp.rator),
-            makeTree(":", [].concat(map(makeASTCexp, exp.rands)), [].concat(map(function (x: CExp): string {
-                    return exp.rands.indexOf(x).toString();
-                }, exp.rands))
-            )], ["rator, rands"]) :
+    return isAppExp(exp) ? makeTree(exp.tag,
+        [makeASTCexp(exp.rator)].concat([makeTree(":", [].concat(map(makeASTCexp, exp.rands)), [].concat(map(function (x: CExp): string {
+            return exp.rands.indexOf(x).toString()
+        }, exp.rands)))])
+        , ["rator", "rands"]) :
         isIfExp(exp) ? makeTree(exp.tag, [].concat(map(makeASTCexp, [exp.test, exp.then, exp.alt])), ["test", "then", "alt"]) :
-            isProcExp(exp) ? makeTree(exp.tag, [].concat(map(makeASTVarDecl, exp.args)).concat(map(makeASTCexp, exp.body)), ["args", "body"]) :
+
+            isProcExp(exp) ?
+
+                makeTree(exp.tag, [makeTree(":", [].concat(map(makeASTVarDecl, exp.args)), [].concat(map(function (x: VarDecl): string {
+                    return exp.args.indexOf(x).toString()
+                }, exp.args))),
+                    makeTree(":", [].concat(map(makeASTCexp, exp.body)), [].concat(map(function (x: CExp): string {
+                        return exp.body.indexOf(x).toString()
+                    }, exp.body)))], ["params", "body"])
+
+                :
                 isAtomicExp(exp) ? makeAstAtomicExp(exp) :
                     isLitExp(exp) ? makeTree(exp.tag, [makeAstSexp(exp.val)], ["val"]) :
-                        isLetExp(exp) ? makeTree(exp.tag, [
+                        isLetExp(exp) ?
+                            makeTree(exp.tag, [makeTree(":", map(
+                                makeBindingTree, exp.bindings),
 
-                                makeTree(":", [].concat(map(function (x: Binding) {
-                                    return makeTree(x.tag, [makeASTVarDecl(x.var), makeASTCexp(x.val)], ["var, val"]);
-                                }, exp.bindings)), [].concat(map(function (x: Binding): string {
-                                    return exp.bindings.indexOf(x).toString();
-                                }, exp.bindings)))
+                                [].concat(map(function (x: Binding): string {
+                                    return exp.bindings.indexOf(x).toString()
+                                }, exp.bindings))),
+                                makeTree(":", [].concat(map(makeASTCexp, exp.body)), [].concat(map(function (x: CExp): string {
+                                    return exp.body.indexOf(x).toString()
+                                }, exp.body)))], ["params", "body"]) :
 
-                                , makeTree("body", map(makeASTCexp, exp.body), [].concat(map(function (x: CExp): string {
-                                    return exp.body.indexOf(x).toString();
-                                }, exp.body)))], ["bindings", "body"]) :
                             makeLeaf("Cexp");
 
 };
@@ -121,11 +135,11 @@ const makeAstAtomicExp = (exp: AtomicExp): Tree => {
 // const p1 = "(define x 4)";
 // console.log(expToTree(p1));
 
-const p2 = "(define y (+ x 4))";
-console.log(expToTree(p2));
+// const p2 = "(define y (+ x 4))";
+// console.log(expToTree(p2));
 
 // const p3 = "(if #t (+ x 4) 6)";
 // console.log(expToTree(p3));
 
-// const p4 = "(lambda (x y) x)";
+// const p4 = "(let ((x 1) (y 2)) (+ x y))";
 // console.log(expToTree(p4));
