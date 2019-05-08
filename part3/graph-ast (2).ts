@@ -91,7 +91,7 @@ const makeClosureStr = (exp: Closure): string[] => {
     // fill this!
     // You may add functions if you like
 
-const varToStr = ()
+// const varToStr = ()
 
 
 export const drawEnvDiagram = (pEnv: {}): Tree | Error => {
@@ -120,8 +120,8 @@ export const drawEnvDiagram = (pEnv: {}): Tree | Error => {
     return makeLeaf('a')
 }
 
-let s: string = 'a'
-safeF(drawEnvDiagram)(safeF(evalParse)(s));
+// let s: string = 'a'
+// safeF(drawEnvDiagram)(safeF(evalParse)(s));
 
 // evalParse('(L4 (define fact(lambda (n)(if (= n 0) 1 (* n (fact (- n 1)))))) (fact 4))')
 // evalParse('(L4 ((lambda(x) (+ 2 x)) 2))')

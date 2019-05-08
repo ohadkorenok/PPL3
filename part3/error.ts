@@ -8,7 +8,7 @@ export const isError = (x: any): x is Error => x instanceof Error;
 // Needed for safeFL
 export const hasNoError = <T1>(x: Array<T1 | Error>): x is T1[] => filter(isError, x).length === 0;
 export const getErrorMessages = (x: any[]): string =>
-    map((x) => JSON.stringify(x.message), filter(isError, x)).join("\n");
+    map((x:Error) => JSON.stringify(x.message), filter(isError, x)).join("\n");
 
 // Make a safe version of f: apply f to x but check if x is an error before applying it.
 export const safeF: <T1, T2>(f: (x: T1) => T2) => (x: T1 | Error) => T2 | Error = 

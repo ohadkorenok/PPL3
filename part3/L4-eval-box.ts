@@ -2,50 +2,57 @@
 // L4 with mutation (set!) and env-box model
 // Direct evaluation of letrec with mutation, define supports mutual recursion.
 
-import { map, reduce, repeat, zipWith } from "ramda";
-import { allT, first, rest, isBoolean, isEmpty, isNumber, isString } from "./list";
-import { getErrorMessages, hasNoError, isError }  from "./error";
-import { isBoolExp, isCExp, isLitExp, isNumExp, isPrimOp, isStrExp, isVarRef, isSetExp,
-         isAppExp, isDefineExp, isExp, isIfExp, isLetrecExp, isLetExp, isProcExp, isProgram, 
-         Binding, PrimOp, VarDecl, CExp, Exp, IfExp, LetrecExp, LetExp, Parsed, ProcExp, Program, SetExp,
-         parse } from "./L4-ast";
-import { applyEnv, applyEnvBdg, globalEnvAddBinding, makeExtEnv, setFBinding,
-            theGlobalEnv, Env } from "./L4-env-box";
-import { isEmptySExp, isSymbolSExp, isClosure, isCompoundSExp, makeClosure, makeCompoundSExp, Closure, 
-         CompoundSExp, EmptySExp, makeEmptySExp, Value } from "./L4-value-box";
-import { Graph } from "graphlib";
+import {map, reduce, repeat, zipWith} from "ramda";
+import {allT, first, rest, isBoolean, isEmpty, isNumber, isString} from "./list";
+import {getErrorMessages, hasNoError, isError} from "./error";
+import {
+    isBoolExp, isCExp, isLitExp, isNumExp, isPrimOp, isStrExp, isVarRef, isSetExp,
+    isAppExp, isDefineExp, isExp, isIfExp, isLetrecExp, isLetExp, isProcExp, isProgram,
+    Binding, PrimOp, VarDecl, CExp, Exp, IfExp, LetrecExp, LetExp, Parsed, ProcExp, Program, SetExp,
+    parse
+} from "./L4-ast";
+import {
+    applyEnv, applyEnvBdg, globalEnvAddBinding, makeExtEnv, setFBinding,
+    theGlobalEnv, Env, persistentEnv, frameVars, frameVals, isExtEnv, isGlobalEnv, unbox, Frame, Box, isFrame, FBinding
+} from "./L4-env-box";
+import {
+    isEmptySExp, isSymbolSExp, isClosure, isCompoundSExp, makeClosure, makeCompoundSExp, Closure,
+    CompoundSExp, EmptySExp, makeEmptySExp, Value
+} from "./L4-value-box";
+import {Graph} from "graphlib";
 import dot = require("graphlib-dot");
+// import {drawEnvDiagram} from "./graph-ast (2)";
 
 // ========================================================
 // Eval functions
 
 const applicativeEval = (exp: CExp | Error, env: Env): Value | Error =>
-    isError(exp)  ? exp :
-    isNumExp(exp) ? exp.val :
-    isBoolExp(exp) ? exp.val :
-    isStrExp(exp) ? exp.val :
-    isPrimOp(exp) ? exp :
-    isVarRef(exp) ? applyEnv(env, exp.var) :
-    isLitExp(exp) ? exp.val :
-    isIfExp(exp) ? evalIf(exp, env) :
-    isProcExp(exp) ? evalProc(exp, env) :
-    isLetExp(exp) ? evalLet(exp, env) :
-    isLetrecExp(exp) ? evalLetrec(exp, env) :
-    isSetExp(exp) ? evalSet(exp, env) :
-    isAppExp(exp) ? applyProcedure(applicativeEval(exp.rator, env),
-                                   map((rand: CExp) => applicativeEval(rand, env),
-                                        exp.rands)) :
-    Error(`Bad L4 AST ${exp}`);
+    isError(exp) ? exp :
+        isNumExp(exp) ? exp.val :
+            isBoolExp(exp) ? exp.val :
+                isStrExp(exp) ? exp.val :
+                    isPrimOp(exp) ? exp :
+                        isVarRef(exp) ? applyEnv(env, exp.var) :
+                            isLitExp(exp) ? exp.val :
+                                isIfExp(exp) ? evalIf(exp, env) :
+                                    isProcExp(exp) ? evalProc(exp, env) :
+                                        isLetExp(exp) ? evalLet(exp, env) :
+                                            isLetrecExp(exp) ? evalLetrec(exp, env) :
+                                                isSetExp(exp) ? evalSet(exp, env) :
+                                                    isAppExp(exp) ? applyProcedure(applicativeEval(exp.rator, env),
+                                                        map((rand: CExp) => applicativeEval(rand, env),
+                                                            exp.rands), env) :
+                                                        Error(`Bad L4 AST ${exp}`);
 
 export const isTrueValue = (x: Value | Error): boolean | Error =>
     isError(x) ? x :
-    ! (x === false);
+        !(x === false);
 
 const evalIf = (exp: IfExp, env: Env): Value | Error => {
     const test = applicativeEval(exp.test, env);
     return isError(test) ? test :
         isTrueValue(test) ? applicativeEval(exp.then, env) :
-        applicativeEval(exp.alt, env);
+            applicativeEval(exp.alt, env);
 };
 
 const evalProc = (exp: ProcExp, env: Env): Closure =>
@@ -54,29 +61,29 @@ const evalProc = (exp: ProcExp, env: Env): Closure =>
 // @Pre: none of the args is an Error (checked in applyProcedure)
 // KEY: This procedure does NOT have an env parameter.
 //      Instead we use the env of the closure.
-const applyProcedure = (proc: Value | Error, args: Array<Value | Error>): Value | Error =>
+const applyProcedure = (proc: Value | Error, args: Array<Value | Error>, callingEnv: Env): Value | Error =>
     isError(proc) ? proc :
-    !hasNoError(args) ? Error(`Bad argument: ${getErrorMessages(args)}`) :
-    isPrimOp(proc) ? applyPrimitive(proc, args) :
-    isClosure(proc) ? applyClosure(proc, args) :
-    Error(`Bad procedure ${JSON.stringify(proc)}`);
+        !hasNoError(args) ? Error(`Bad argument: ${getErrorMessages(args)}`) :
+            isPrimOp(proc) ? applyPrimitive(proc, args) :
+                isClosure(proc) ? applyClosure(proc, args, callingEnv) :
+                    Error(`Bad procedure ${JSON.stringify(proc)}`);
 
-const applyClosure = (proc: Closure, args: Value[]): Value | Error => {
+const applyClosure = (proc: Closure, args: Value[], callingEnv: Env): Value | Error => {
     let vars = map((v: VarDecl) => v.var, proc.params);
-    return evalExps(proc.body, makeExtEnv(vars, args, proc.env));
-}
+    return evalExps(proc.body, makeExtEnv(vars, args, proc.env, callingEnv));
+};
 
 // Evaluate a sequence of expressions (in a program)
 export const evalExps = (exps: Exp[], env: Env): Value | Error =>
     isEmpty(exps) ? Error("Empty program") :
-    isDefineExp(first(exps)) ? evalDefineExps(first(exps), rest(exps)) :
-    evalCExps(first(exps), rest(exps), env);
-    
+        isDefineExp(first(exps)) ? evalDefineExps(first(exps), rest(exps)) :
+            evalCExps(first(exps), rest(exps), env);
+
 const evalCExps = (exp1: Exp, exps: Exp[], env: Env): Value | Error =>
     isCExp(exp1) && isEmpty(exps) ? applicativeEval(exp1, env) :
-    isCExp(exp1) ? (isError(applicativeEval(exp1, env)) ? Error("error") :
-                    evalExps(exps, env)) :
-    Error("Never");
+        isCExp(exp1) ? (isError(applicativeEval(exp1, env)) ? Error("error") :
+            evalExps(exps, env)) :
+            Error("Never");
 
 // Eval a sequence of expressions when the first exp is a Define.
 // Compute the rhs of the define, extend the env with the new binding
@@ -174,28 +181,28 @@ const one: number = 1;
 // TODO: Add explicit type checking in all primitives
 export const applyPrimitive = (proc: PrimOp, args: Value[]): Value | Error =>
     proc.op === "+" ? (allT(isNumber, args) ? reduce((x: number, y: number) => x + y, zero, args) : Error("+ expects numbers only")) :
-    proc.op === "-" ? minusPrim(args) :
-    proc.op === "*" ? (allT(isNumber, args) ? reduce((x: number, y: number) => x * y, one, args) : Error("* expects numbers only")) :
-    proc.op === "/" ? divPrim(args) :
-    proc.op === ">" ? ((allT(isNumber, args) || allT(isString, args)) ? args[0] > args[1] : Error("> expects numbers or strings only")) :
-    proc.op === "<" ? ((allT(isNumber, args) || allT(isString, args)) ? args[0] < args[1] : Error("< expects numbers or strings only")) :
-    proc.op === "=" ? args[0] === args[1] :
-    proc.op === "not" ? ! args[0] :
-    proc.op === "and" ? isBoolean(args[0]) && isBoolean(args[1]) && args[0] && args[1] :
-    proc.op === "or" ? isBoolean(args[0]) && isBoolean(args[1]) && (args[0] || args[1]) :
-    proc.op === "eq?" ? eqPrim(args) :
-    proc.op === "string=?" ? args[0] === args[1] :
-    proc.op === "cons" ? consPrim(args[0], args[1]) :
-    proc.op === "car" ? carPrim(args[0]) :
-    proc.op === "cdr" ? cdrPrim(args[0]) :
-    proc.op === "list" ? listPrim(args) :
-    proc.op === "list?" ? isListPrim(args[0]) :
-    proc.op === "pair?" ? isPairPrim(args[0]) :
-    proc.op === "number?" ? typeof(args[0]) === 'number' :
-    proc.op === "boolean?" ? typeof(args[0]) === 'boolean' :
-    proc.op === "symbol?" ? isSymbolSExp(args[0]) :
-    proc.op === "string?" ? isString(args[0]) :
-    Error("Bad primitive op " + proc.op);
+        proc.op === "-" ? minusPrim(args) :
+            proc.op === "*" ? (allT(isNumber, args) ? reduce((x: number, y: number) => x * y, one, args) : Error("* expects numbers only")) :
+                proc.op === "/" ? divPrim(args) :
+                    proc.op === ">" ? ((allT(isNumber, args) || allT(isString, args)) ? args[0] > args[1] : Error("> expects numbers or strings only")) :
+                        proc.op === "<" ? ((allT(isNumber, args) || allT(isString, args)) ? args[0] < args[1] : Error("< expects numbers or strings only")) :
+                            proc.op === "=" ? args[0] === args[1] :
+                                proc.op === "not" ? !args[0] :
+                                    proc.op === "and" ? isBoolean(args[0]) && isBoolean(args[1]) && args[0] && args[1] :
+                                        proc.op === "or" ? isBoolean(args[0]) && isBoolean(args[1]) && (args[0] || args[1]) :
+                                            proc.op === "eq?" ? eqPrim(args) :
+                                                proc.op === "string=?" ? args[0] === args[1] :
+                                                    proc.op === "cons" ? consPrim(args[0], args[1]) :
+                                                        proc.op === "car" ? carPrim(args[0]) :
+                                                            proc.op === "cdr" ? cdrPrim(args[0]) :
+                                                                proc.op === "list" ? listPrim(args) :
+                                                                    proc.op === "list?" ? isListPrim(args[0]) :
+                                                                        proc.op === "pair?" ? isPairPrim(args[0]) :
+                                                                            proc.op === "number?" ? typeof (args[0]) === 'number' :
+                                                                                proc.op === "boolean?" ? typeof (args[0]) === 'boolean' :
+                                                                                    proc.op === "symbol?" ? isSymbolSExp(args[0]) :
+                                                                                        proc.op === "string?" ? isString(args[0]) :
+                                                                                            Error("Bad primitive op " + proc.op);
 
 const minusPrim = (args: Value[]): number | Error => {
     // TODO complete
@@ -236,18 +243,18 @@ const eqPrim = (args: Value[]): boolean | Error => {
 
 const carPrim = (v: Value): Value | Error =>
     isCompoundSExp(v) ? v.val1 :
-    Error(`Car: param is not compound ${v}`);
+        Error(`Car: param is not compound ${v}`);
 
 const cdrPrim = (v: Value): Value | Error =>
     isCompoundSExp(v) ? v.val2 :
-    Error(`Cdr: param is not compound ${v}`);
+        Error(`Cdr: param is not compound ${v}`);
 
 const consPrim = (v1: Value, v2: Value): CompoundSExp =>
     makeCompoundSExp(v1, v2);
 
 export const listPrim = (vals: Value[]): EmptySExp | CompoundSExp =>
     vals.length === 0 ? makeEmptySExp() :
-    makeCompoundSExp(first(vals), listPrim(rest(vals)))
+        makeCompoundSExp(first(vals), listPrim(rest(vals)))
 
 const isListPrim = (v: Value): boolean =>
     isEmptySExp(v) || isCompoundSExp(v);
@@ -258,14 +265,51 @@ const isPairPrim = (v: Value): boolean =>
 interface Tree {
     tag: "Tree",
     rootId: string,
-    graph: Graph, 
+    graph: Graph,
 }
 
+export const isTree = (x: any): x is Tree => x.tag === "Tree";
+//
 export const drawEnvDiagram = (pEnv: {}): Tree | Error => {
-    // TODO
-}
-export const evalParseDraw = (s: string): string | Error => {
+    let visitedEnvs: string[] = [];
+    let envs = Object.keys(pEnv).sort();
+    let lastEnv = envs[-1];
+    let nitzan = envToStr(pEnv['E0']);
+    let graph = new Graph();
+    let ohad = aggregateClosuresDefinedInEnv(pEnv['GE']);
+    map((envName:string) =>graph.setNode(envName, envToStr(pEnv[envName])),envs);
+    return { tag: "Tree", rootId: "BOO", graph };
+};
 
-    // TODO
-}
+const aggregateClosuresDefinedInEnv = (env:Env):FBinding[]=>{
+    return isGlobalEnv(env) ? env.frame[0].fbindings.filter((x:FBinding) => isClosure(unbox(x.val))):
+        env.frame.fbindings.filter((x:FBinding) => isClosure(unbox(x.val)));
+};
+const envToName = (env: Env): string => isGlobalEnv(env) ? "GE" : env.id;
+
+const envToStr = (env: Env) =>{
+  return {label:"{"+envToLabel(env)+"}" ,shape:"Mrecord"};
+};
+
+const envToLabel = (env: Env): string => {
+    return isGlobalEnv(env)? envToName(env) +"|"+stringifyFrame(env.frame[0]):
+        envToName(env)+"|"+stringifyFrame(env.frame);
+    // return envToName(env) +"|"+ isGlobalEnv(env) ? stringifyFrame(env.frame[0]) : stringifyFrame(isFrame(env.frame)? env.frame : Error("Shitty stuff"));
+        // envToName(env) + "|" + zipWith((oneVar: string, oneVal: Value) => isClosure(oneVal) ?
+        // "<" + oneVar + ">" + oneVar + ":\\1" : oneVar + ":" + oneVal, frameVars(env.frame), frameVals(env.frame)).join("\\1|")+"\\1";
+};
+const stringifyFrame = (frame:Frame | Error):string=>{
+    return isError(frame)? "ERR":
+    zipWith((oneVar: string, oneVal: Value) => isClosure(oneVal) ?
+        "<" + oneVar + ">" + oneVar + ":\\l" : oneVar + ":" + oneVal, frameVars(frame), frameVals(frame)).join("\\l|")+"\\l"
+};
+
+export const evalParseDraw = (s: string): string | Error => {
+    evalParse(s);
+    let t1 = drawEnvDiagram(persistentEnv);
+    return isTree(t1) ? dot.write(t1.graph) : Error("Problem brother");
+};
+
+const generateId = () => '_' + Math.random().toString(36).substr(2, 9);
+console.log(evalParseDraw("(L4 (define z 4) (define foo (lambda (x y) (+ x y))) (foo 4 5))"));
 

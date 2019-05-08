@@ -37,18 +37,19 @@ import { Value } from './L4-value-box';
 // ========================================================
 // Box datatype
 // Encapsulate mutation in a single type.
-type Box<T> = T[];
-const makeBox = <T>(x: T): Box<T> => ([x]);
-const unbox = <T>(b: Box<T>): T => b[0];
-const setBox = <T>(b: Box<T>, v: T): void => { b[0] = v; return; }
+export type Box<T> = T[];
+export const makeBox = <T>(x: T): Box<T> => ([x]);
+export const unbox = <T>(b: Box<T>): T => b[0];
+export const setBox = <T>(b: Box<T>, v: T): void => { b[0] = v; return; };
 
 // ========================================================
 // Frame binding
-interface FBinding {
+export interface FBinding {
     tag: "FBinding";
     var: string;
     val: Box<Value>;
-};
+}
+export let persistentEnv = {};
 
 export const isFBinding = (x: any): x is FBinding => x.tag === "FBinding";
 export const makeFBinding = (v: string, val: Value): FBinding =>
@@ -112,10 +113,16 @@ export interface ExtEnv {
     tag: "ExtEnv";
     frame: Frame;
     env: Env;
+    id: EnvId
+    callingEnv? : Env
 };
 export const isExtEnv = (x: any): x is ExtEnv => x.tag === "ExtEnv";
-export const makeExtEnv = (vs: string[], vals: Value[], env: Env): ExtEnv =>
-    ({tag: "ExtEnv", frame: makeFrame(vs, vals), env: env});
+export const makeExtEnv = (vs: string[], vals: Value[], env: Env, callingEnv?): ExtEnv => {
+    let id: EnvId = generateEnvId();
+    let extendedEnv: ExtEnv=({tag: "ExtEnv", frame: makeFrame(vs, vals), env: env, id:id, callingEnv:callingEnv});
+    persistentEnv[id]=extendedEnv;
+    return extendedEnv;
+};
 export const ExtEnvVars = (env: ExtEnv): string[] =>
     map(getFBindingVar, env.frame.fbindings);
 export const ExtEnvVals = (env: ExtEnv): Value[] =>
@@ -137,7 +144,9 @@ interface GlobalEnv {
     frame: Box<Frame>;
 };
 export const isGlobalEnv = (x: any): x is GlobalEnv => x.tag === "GlobalEnv";
-const makeGlobalEnv = (): GlobalEnv => ({tag: "GlobalEnv", frame: makeBox(makeFrame([], []))});
+const makeGlobalEnv = (): GlobalEnv => {
+    persistentEnv['GE'] =({tag: "GlobalEnv", frame: makeBox(makeFrame([], []))});
+    return persistentEnv['GE']};
 // There is a single mutable value in the type Global-env
 export const theGlobalEnv = makeGlobalEnv();
 
@@ -161,7 +170,6 @@ const generateEnvId = (): EnvId => {
     return "E" + currentId;
 }
 
-export let persistentEnv = {};  
 
 type BodyId = string;  
 let bodyIdCounter: Box<number> = makeBox(0);

@@ -137,8 +137,8 @@ const makeAstAtomicExp = (exp: AtomicExp): Tree => {
 // const p1 = "(L4 (define x 4))";
 // console.log(expToTree(p1));
 
-// const p2 = "(define y (+ x 4))";
-// console.log(expToTree(p2));
+const p2 = "(define y (+ x 4))";
+console.log(expToTree(p2));
 
 // const p3 = "(L4 (if #t (+ x 4) 6))";
 // console.log(expToTree(p3));
