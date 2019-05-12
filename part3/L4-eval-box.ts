@@ -2,18 +2,34 @@
 // L4 with mutation (set!) and env-box model
 // Direct evaluation of letrec with mutation, define supports mutual recursion.
 
-import {map, reduce, repeat, zipWith} from "ramda";
+import {map, reduce, filter, repeat, zipWith} from "ramda";
 import {allT, first, rest, isBoolean, isEmpty, isNumber, isString} from "./list";
 import {getErrorMessages, hasNoError, isError} from "./error";
 import {
     isBoolExp, isCExp, isLitExp, isNumExp, isPrimOp, isStrExp, isVarRef, isSetExp,
     isAppExp, isDefineExp, isExp, isIfExp, isLetrecExp, isLetExp, isProcExp, isProgram,
     Binding, PrimOp, VarDecl, CExp, Exp, IfExp, LetrecExp, LetExp, Parsed, ProcExp, Program, SetExp,
-    parse
+    parse, unparse
 } from "./L4-ast";
 import {
-    applyEnv, applyEnvBdg, globalEnvAddBinding, makeExtEnv, setFBinding,
-    theGlobalEnv, Env, persistentEnv, frameVars, frameVals, isExtEnv, isGlobalEnv, unbox, Frame, Box, isFrame, FBinding
+    applyEnv,
+    applyEnvBdg,
+    globalEnvAddBinding,
+    makeExtEnv,
+    setFBinding,
+    theGlobalEnv,
+    Env,
+    persistentEnv,
+    frameVars,
+    frameVals,
+    isExtEnv,
+    isGlobalEnv,
+    unbox,
+    Frame,
+    Box,
+    isFrame,
+    FBinding,
+    getFBindingVal, ExtEnv, makeFrame, generateBodyId
 } from "./L4-env-box";
 import {
     isEmptySExp, isSymbolSExp, isClosure, isCompoundSExp, makeClosure, makeCompoundSExp, Closure,
@@ -124,14 +140,16 @@ export const evalParse = (s: string): Value | Error => {
 // LET: Direct evaluation rule without syntax expansion
 // compute the values, extend the env, eval the body.
 const evalLet = (exp: LetExp, env: Env): Value | Error => {
+    const closure: Closure = makeClosure(map((x) => x.var, exp.bindings), exp.body, env);
     const vals = map((v: CExp) => applicativeEval(v, env), map((b: Binding) => b.val, exp.bindings));
     const vars = map((b: Binding) => b.var.var, exp.bindings);
     if (hasNoError(vals)) {
-        return evalExps(exp.body, makeExtEnv(vars, vals, env));
+        return applyClosure(closure, vals, env);
+        // return evalExps(exp.body, makeExtEnv(vars, vals, env));
     } else {
         return Error(getErrorMessages(vals));
     }
-}
+};
 
 // @@ L4-EVAL-BOX 
 // LETREC: Direct evaluation rule without syntax expansion
@@ -268,40 +286,97 @@ interface Tree {
     graph: Graph,
 }
 
+const makeClosureStr = (exp: Closure): string[] => {
+    let params: string[] = exp.params.map((v) => v.var);
+    let paramsStr: string = "p:" + params.join(", ") + "\\l|";
+    let body: string[] = exp.body.map((x) => unparse(x));
+    let bodyStr: string = ("b: ") + body.join(" ") + "\\l|";
+    let closureSymb: string = '<0>\u25EF\u25EF\\l|';
+    let label: string = '{' + closureSymb + paramsStr + " " + bodyStr + '}';
+    let shape: string = 'record';
+    let color: string = 'white';
+    let bodyId: string = exp.bodyId;
+    return [label, shape, color, bodyId]
+};
+
 export const isTree = (x: any): x is Tree => x.tag === "Tree";
+
 //
 export const drawEnvDiagram = (pEnv: {}): Tree | Error => {
-    let visitedEnvs: string[] = [];
     let envs = Object.keys(pEnv).sort();
-    let lastEnv = envs[-1];
-    let nitzan = envToStr(pEnv['E0']);
+    let realEnvs: Env[] = Object.values(pEnv);
     let graph = new Graph();
-    let ohad = aggregateClosuresDefinedInEnv(pEnv['GE']);
-    map((envName:string) =>graph.setNode(envName, envToStr(pEnv[envName])),envs);
-    return { tag: "Tree", rootId: "BOO", graph };
+    map((x: Env) => {
+
+
+        aggregateClosuresDefinedInEnv(pEnv[envToName(x)]).map((y: FBinding) => {
+            let unboxxedValue = unbox(y.val);
+            graph.setEdge(envToName(x)
+                , typeof unboxxedValue !== 'undefined' && isClosure(unboxxedValue) ? unboxxedValue.bodyId : generateBodyId()
+                , {tailport: y.var, headport: '0'})
+            graph.setEdge(typeof unboxxedValue !== 'undefined' && isClosure(unboxxedValue) ? unboxxedValue.bodyId : generateBodyId(), envToName(x), {headport: '0'});
+        });
+        let bindingVals = map((x: FBinding) => getFBindingVal(x), aggregateClosuresDefinedInEnv(pEnv[envToName(x)]));
+        let closureStrArray = bindingVals.filter((x: Value) => isClosure(x)).map((x: Value) => {
+            return isClosure(x) ? makeClosureStr(x) : [];
+        });
+        map((x: string[]) => graph.setNode(x[3], {label: x[0], shape: x[1], color: x[2]}), closureStrArray);
+    }, realEnvs);
+
+    map((envName: string) => graph.setNode(envName, envToStr(pEnv[envName])), envs);
+    map((x: ExtEnv) => graph.setEdge(x.id, isGlobalEnv(x.env) ? 'GE' : x.env.id), Object.values(pEnv).filter(isExtEnv, realEnvs));
+
+    // Now lets create the dashed arrow
+    // 1. go on all the callingEnvs in the envs
+    // 2. create nodes with label and name
+    // 3. set edges with style dashed
+    map((env: ExtEnv) => {
+            if (typeof env.callingEnv !== 'undefined' && !graph.hasNode(envToName(env.callingEnv) + "_link")) {
+                graph.setNode(envToName(env.callingEnv) + "_link", envToPlainStr(env.callingEnv))
+            }
+        }
+        , Object.values(pEnv).filter(isExtEnv, realEnvs));
+    map((env: ExtEnv) => {
+        if (typeof env.callingEnv !== 'undefined') {
+            graph.setEdge(env.id, envToName(env.callingEnv) + "_link", envToStrDashed())
+        }
+    }, Object.values(pEnv).filter(isExtEnv, realEnvs));
+
+
+    return {tag: "Tree", rootId: "BOO", graph};
 };
 
-const aggregateClosuresDefinedInEnv = (env:Env):FBinding[]=>{
-    return isGlobalEnv(env) ? env.frame[0].fbindings.filter((x:FBinding) => isClosure(unbox(x.val))):
-        env.frame.fbindings.filter((x:FBinding) => isClosure(unbox(x.val)));
-};
-const envToName = (env: Env): string => isGlobalEnv(env) ? "GE" : env.id;
 
-const envToStr = (env: Env) =>{
-  return {label:"{"+envToLabel(env)+"}" ,shape:"Mrecord"};
+const envToPlainStr = (env: Env) => {
+    return {label: envToName(env), shape: "plaintext"};
+}
+
+const aggregateClosuresDefinedInEnv = (env: Env): FBinding[] => {
+    return isGlobalEnv(env) ? env.frame[0].fbindings.filter((x: FBinding) => isClosure(unbox(x.val))) :
+        env.frame.fbindings.filter((x: FBinding) => isClosure(unbox(x.val)));
+
+};
+
+const envToName = (env: Env): string => isGlobalEnv(env) ? 'GE' : env.id;
+
+const envToStr = (env: Env) => {
+    return {label: "{" + envToLabel(env) + "}", shape: "Mrecord"};
+};
+
+const envToStrDashed = () => {
+    return {style: "dashed"};
+
+
 };
 
 const envToLabel = (env: Env): string => {
-    return isGlobalEnv(env)? envToName(env) +"|"+stringifyFrame(env.frame[0]):
-        envToName(env)+"|"+stringifyFrame(env.frame);
-    // return envToName(env) +"|"+ isGlobalEnv(env) ? stringifyFrame(env.frame[0]) : stringifyFrame(isFrame(env.frame)? env.frame : Error("Shitty stuff"));
-        // envToName(env) + "|" + zipWith((oneVar: string, oneVal: Value) => isClosure(oneVal) ?
-        // "<" + oneVar + ">" + oneVar + ":\\1" : oneVar + ":" + oneVal, frameVars(env.frame), frameVals(env.frame)).join("\\1|")+"\\1";
+    return isGlobalEnv(env) ? envToName(env) + "|" + stringifyFrame(env.frame[0]) :
+        envToName(env) + "|" + stringifyFrame(env.frame);
 };
-const stringifyFrame = (frame:Frame | Error):string=>{
-    return isError(frame)? "ERR":
-    zipWith((oneVar: string, oneVal: Value) => isClosure(oneVal) ?
-        "<" + oneVar + ">" + oneVar + ":\\l" : oneVar + ":" + oneVal, frameVars(frame), frameVals(frame)).join("\\l|")+"\\l"
+const stringifyFrame = (frame: Frame | Error): string => {
+    return isError(frame) ? "ERR" :
+        zipWith((oneVar: string, oneVal: Value) => isClosure(oneVal) ?
+            "<" + oneVar + ">" + oneVar + ":\\l" : oneVar + ":" + oneVal, frameVars(frame), frameVals(frame)).join("\\l|") + "\\l"
 };
 
 export const evalParseDraw = (s: string): string | Error => {

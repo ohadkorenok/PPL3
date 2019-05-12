@@ -32,7 +32,7 @@
 
 import { map, prepend, zipWith } from "ramda";
 import { isError } from "./error";
-import { Value } from './L4-value-box';
+import {Closure, Value} from './L4-value-box';
 
 // ========================================================
 // Box datatype
@@ -171,10 +171,10 @@ const generateEnvId = (): EnvId => {
 }
 
 
-type BodyId = string;  
+export type BodyId = string;
 let bodyIdCounter: Box<number> = makeBox(0);
 
-const generateBodyId = (): BodyId => {
+export const generateBodyId = (): BodyId => {
     let currentId = unbox(bodyIdCounter);
     setBox(bodyIdCounter, currentId + 1);
     return "B" + currentId;
